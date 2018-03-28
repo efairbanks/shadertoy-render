@@ -67,3 +67,5 @@ target/
 
 # Emacs config
 /.dir-locals.el
+
+.DS_Store

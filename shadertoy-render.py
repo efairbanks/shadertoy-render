@@ -45,7 +45,7 @@ fragment_template = """
 #version 120
 
 uniform vec3      iResolution;           // viewport resolution (in pixels)
-uniform float     iGlobalTime;           // shader playback time (in seconds)
+uniform float     iTime;           // shader playback time (in seconds)
 uniform vec4      iMouse;                // mouse pixel coords
 uniform vec4      iDate;                 // (year, month, day, time in seconds)
 uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
@@ -71,7 +71,7 @@ error_shader = """
 void mainImage( out vec4 fragColor, in vec2 fragCoord )
 {
     vec2 uv = fragCoord.xy / iResolution.xy;
-    fragColor = vec4(uv,0.5+0.5*sin(iGlobalTime),1.0);
+    fragColor = vec4(uv,0.5+0.5*sin(iTime),1.0);
 }
 """
 
@@ -158,7 +158,7 @@ class RenderingCanvas(app.Canvas):
 
         for i in range(4):
             self.program['iChannelTime[%d]' % i] = 0.0
-        self.program['iGlobalTime'] = start_time
+        self.program['iTime'] = start_time
 
         self.program['iOffset'] = 0.0, 0.0
 
@@ -210,9 +210,9 @@ class RenderingCanvas(app.Canvas):
     def advance_time(self):
         if not self._paused:
             if self._interval == 'auto':
-                self.program['iGlobalTime'] = time.clock() - self._clock_time_zero
+                self.program['iTime'] = time.clock() - self._clock_time_zero
             else:
-                self.program['iGlobalTime'] += self._interval
+                self.program['iTime'] += self._interval
 
     def write_video_frame(self, img):
         if img.shape[0] != self._output_size[1] or img.shape[1] != self._output_size[0]:
@@ -344,7 +344,7 @@ class RenderingCanvas(app.Canvas):
             if event.key == keys.LEFT:
                 step *= -1.0
 
-            self.program['iGlobalTime'] += step
+            self.program['iTime'] += step
 
             self.print_t()
 
@@ -435,7 +435,7 @@ class RenderingCanvas(app.Canvas):
         return '\n'.join(linesOut)
 
     def print_t(self):
-        print("t=%f" % self.program['iGlobalTime'])
+        print("t=%f" % self.program['iTime'])
 
     def ensure_timer(self):
         if not self._timer:
@@ -445,7 +445,7 @@ class RenderingCanvas(app.Canvas):
 
     def update_timer_state(self):
         if not self._paused:
-            self._clock_time_zero = time.clock() - self.program['iGlobalTime']
+            self._clock_time_zero = time.clock() - self.program['iTime']
             self.ensure_timer()
         else:
             if self._profile:
