@@ -1,170 +1,147 @@
-#define MARCH_STEPS 200.0
-#define MARCH_EPSILON 0.0001
-#define SHADOW_STEPS 50.0
-#define SHADOW_EPSILON 0.01
-#define GRADIENT_STEP 0.02
-#define MAX_DISTANCE 50.
+#define EPSILON 0.001
+#define PI 3.1415
 
-float sphere( vec3 p, float s )
-{
-  return length(p)-s;
+vec2 uv2p(vec2 uv) {return ((uv.xy*iResolution.xy) * 2. - iResolution.xy) / min(iResolution.x, iResolution.y);}
+vec2 p2uv(vec2 p) {return ((p*min(iResolution.x, iResolution.y))+iResolution.xy)/(2.*iResolution.xy);}
+
+vec2 rot(vec2 p, vec2 around, float rad) {
+  vec2 o = around;
+  vec2 r = p-around;
+  float angle = atan(r.y,r.x)+rad;
+  float mag = length(r);
+  return vec2(cos(angle),sin(angle))*mag+o;
 }
 
-float box(vec3 p, vec3 b, float roundness)
-{
-  return length(max(abs(p)-(b-vec3(roundness)),0.0))-roundness;
+vec3 opRep( vec3 p, vec3 c ) {
+  vec3 q = mod(p,c)-0.5*c;
+  return q;
 }
 
-float smin( float a, float b, float k )
-{
-  float h = clamp(0.5+0.5*(b-a)/k,0.0,1.0);
-  return mix(b,a,h)-k*h*(1.0-h);
+float sdBox( vec3 p, vec3 b ) {
+  vec3 d = abs(p) - b;
+  return min(max(d.x,max(d.y,d.z)),0.0) + length(max(d,0.0));
 }
 
-// ----- //
-// ----- //
-// ----- //
-
-#define FOV 0.5
-#define CAMERA_DISTANCE 10.
-
-float iOvertoneVolume = 0.001;
-
-float map(vec3 p)
-{
-  vec3 q = p;
-  float d = sphere(p, 1.);
-  q.x = q.x + 3.;
-  d = min(d, sphere(q, 1.));
-  q = p;
-  d = min(d, -q.y+1.);
-  return d;
+float sdCross(vec3 p, float width) {
+  float x = abs(p.x)-(width/3.);
+  float y = abs(p.y)-(width/3.);
+  float z = abs(p.z)-(width/3.);
+  return max(sdBox(p,vec3(width)),min(min(max(x,z),max(x,y)),max(y,z)));
 }
 
-// ----- //
-// ----- //
-// ----- //
-
-void cameraRay(vec2 scanLines, vec3 cameraPosition, vec3 target, float fov, out vec3 pos, out vec3 dir)
-{
-  vec3 forward = normalize(target-cameraPosition);
-  vec3 up = vec3(0.,1.,0.);
-  vec3 right = normalize(cross(forward, up));
-  up = normalize(cross(forward,right));
-
-  right = right*scanLines.x*fov;
-  up = up*scanLines.y*fov;
-
-  pos = cameraPosition;
-  dir = (right+up+forward);
+float sdSpongeUnit(vec3 p, float width) {
+  return max(-sdCross(p,width*1.01),sdBox(p,vec3(width)));
 }
 
-float castRay( in vec3 ro, in vec3 rd )
-{
-  float tmin = 1.0;
-  float tmax = 50.0;
+float map(vec3 p) {
+  //p.xz = opRep(p,vec3(3.)).xz;
+  float size = 6.;
+  float fi = 1.;
 
-  float precis = MARCH_EPSILON;
-  float t = tmin;
-  for( int i=0; i<int(MARCH_STEPS); i++ )
-  {
-    float res = map( ro+rd*t );
-    if( res<precis || t>tmax ) break;
-    t += res;
+  for(int i=0; i < 10; i++) {
+    p = abs(p);
+    p.zx = rot(p.zx,vec2(0.),0.36);
+    p.zy = rot(p.zy,vec2(0.),2.9);
   }
-  return t;
+
+  vec3 temp = p;
+  float d = sdSpongeUnit(p,6.);
+  for(int i=0; i<5; i++) {
+    temp = opRep(temp+vec3(size/fi), vec3(size*2./fi));
+    d = max(-sdCross(temp,size*1.004/fi),d);
+    fi *= 3.;
+  }
+  //temp.xz = rot(temp.xz,vec2(0.),3.1415/4.);
+  return d+0.001;
 }
 
-vec3 calcNormal( vec3 pos )
-{
-  const vec3 dx = vec3( GRADIENT_STEP, 0.0, 0.0 );
-  const vec3 dy = vec3( 0.0, GRADIENT_STEP, 0.0 );
-  const vec3 dz = vec3( 0.0, 0.0, GRADIENT_STEP );
+vec3 gradient(vec3 p) {
   return normalize(vec3(
-        map( pos + dx ) - map( pos - dx ),
-        map( pos + dy ) - map( pos - dy ),
-        map( pos + dz ) - map( pos - dz )
+        map(vec3(p.x + EPSILON, p.y, p.z)) - map(vec3(p.x - EPSILON, p.y, p.z)),
+        map(vec3(p.x, p.y + EPSILON, p.z)) - map(vec3(p.x, p.y - EPSILON, p.z)),
+        map(vec3(p.x, p.y, p.z  + EPSILON)) - map(vec3(p.x, p.y, p.z - EPSILON))
         ));
 }
 
-float calcDiffuse(vec3 normal, vec3 lightPosition)
-{
-  return max(dot(normal,normalize(lightPosition)),0.);
-}
+#define TMIN 1.5
+#define TMAX 100.
 
-float calcShadows( in vec3 ro, in vec3 rd, in float mint, in float tmax )
-{
-  float res = 1.0;
-  float t = mint;
-  for( int i=0; i<int(SHADOW_STEPS); i++ )
-  {
-    float h = map( ro + rd*t );
-    res = min( res, 8.0*h/t );
-    t += clamp( h, 0.02, 0.10 );
-    if( h<SHADOW_EPSILON || t>tmax ) break;
+float trace(vec3 origin, vec3 ray) {
+  float t = TMIN;
+  for(int i=0;i<50;i++) {
+    vec3 p = origin+(ray*t);
+    float d = map(p);
+    if(t>TMAX) return -1.;
+    if(d<EPSILON) return t;
+    t+=d*0.7;
   }
-  return clamp( res, 0.0, 1.0 );
+  return -1.;
 }
 
-vec2 scaleCoords(vec2 coords) {
-  vec2 uv = coords.xy / iResolution.xy;
-  uv = uv*2.-1.;
-  uv.x = uv.x*iResolution.x/iResolution.y;
-  return uv;
+float shadow(vec3 origin, vec3 ray) {
+  float t = TMIN;
+  for(int i=0;i<100;i++) {
+    vec3 p = origin+(ray*t);
+    float d = map(p);
+    if(t>TMAX) return -1.;
+    if(d<EPSILON) return t;
+    t+=d*0.5;
+  }
+  return -1.;
 }
 
-// ----- //
-// ----- //
-// ----- //
-
-const vec3 HORIZON_COLOR = vec3(1., 0.7, 0.65);
-
-float calcLight(vec3 surface, vec3 lightOrigin) {
-  float diffuseLight = calcDiffuse(calcNormal(surface), lightOrigin);
-  float shadow = calcShadows(surface, lightOrigin, 1., 4.25);
-  float ambient = 0.02;
-  float col = diffuseLight*shadow*0.7+ambient;
-  return col;
+float light(vec3 p, vec3 l) {
+  float light = (max(0.,dot(gradient(p),normalize(l)))/pow(1.1,length(p-l)))+0.1;
+  //if(shadow(p,normalize(l-p))>0.) light=0.;
+  return light;
 }
 
-vec3 calcLightAndReflections(vec3 surface, vec3 lightOrigin) {
-  float col = 0.;
-  col = calcLight(surface, lightOrigin);
-  vec3 normal = calcNormal(surface);
-  float distance = castRay(surface, normal);
-  vec3 reflectionPoint = surface + normal*distance;
-  vec3 reflection = vec3(calcLight(reflectionPoint, lightOrigin));
-  reflection = max(reflection, 0.);
-  if(length(distance) > MAX_DISTANCE) reflection = HORIZON_COLOR;
-  return vec3(col)+vec3(reflection)*0.5;
+float lsource(vec3 origin, vec3 dest, vec3 light) {
+  vec3 ray = normalize(dest-origin);
+  float dist = distance(origin,dest);
+  float t = 0.;
+  float shade = 0.;
+  for(int i=0;i<15;i++) {
+    t+=(dist/15.);
+    if(t>dist) break;
+    if(trace(light,normalize((ray*t+origin)-light))<0.) shade += 30./pow(2.,distance(ray*dist+origin,light));
+  }
+  return shade;
 }
 
-// ----- //
-// ----- //
-// ----- //
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 uv = gl_FragCoord.xy / iResolution.xy;
+  vec2 p = uv2p(uv)*1.;
+  vec2 oldp = p;
 
-void mainImage(out vec4 fragColor, in vec2 fragCoord)
-{
-  vec2 uv = scaleCoords(fragCoord.xy);
-  // equvalent to the video's spec.y, I think
+  vec3 origin = vec3(10.);
 
-  vec3 camRayOrigin;
-  vec3 camRayDirection;
-  cameraRay(uv, vec3(sin(iTime/3.),0.,cos(iTime/3.))*CAMERA_DISTANCE,
-      vec3(0.),
-      FOV,
-      camRayOrigin,
-      camRayDirection);
+  origin.xz = rot(origin.xz,vec2(0.),iTime);
+  origin.y = sin(iTime)*5.;
+  
+  /*
+  origin.y = (mouse.y-0.5)*(4.);
+  //origin.z = sin(mouse.x*10.-2.)*1.;
+  //origin.x = cos(mouse.x*10.-2.)*1.;
+  origin.xz -= vec2(1.0);
+  origin.xz = rot(origin.xz,vec2(0.),mouse.x*12.);
+  origin = origin*(mouse.y+0.5);
+  origin.xz *= mouse.y*10.;
+  */
 
-  float camRayDistance = castRay(camRayOrigin, camRayDirection);
-  vec3 surface = camRayOrigin + (camRayDirection*camRayDistance);
+  vec3 ray    = normalize(vec3(0.)-origin);
+  vec3 right  = normalize(cross(ray,vec3(0.,1.,0.)));
+  vec3 up     = normalize(cross(ray,right));
+  ray += right*p.x + up*p.y;
 
-  // light 1
+  float t = trace(origin, ray);
 
-  vec3 col = vec3(calcLightAndReflections(surface, vec3(-1.)));
+  float lout = 0.;
+  lout += light(ray*t+origin,vec3(1.))*1.;
+  lout = pow(lout,1.2)*1.5;
+  //lout += light(ray*t+origin,origin*vec3(1.,.1,-1.))*4.;
+  if(t<0.) lout = 0.;
 
-  if(camRayDistance>=50.) col = HORIZON_COLOR;
-
-  fragColor = vec4(col,1.0);
+  fragColor = vec4(vec3(lout),1.0)/0.7;
 }
 

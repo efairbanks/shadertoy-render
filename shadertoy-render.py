@@ -582,7 +582,7 @@ if __name__ == '__main__':
              '-pix_fmt', 'rgba',
              '-s', args.size,
              '-i', '-',
-             '-c:v', 'libx264',
+             '-c:v', 'mpeg4',
              '-y', args.output),
             stdin=subprocess.PIPE)
         ffmpeg_pipe = ffmpeg.stdin
